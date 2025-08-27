@@ -1,46 +1,52 @@
-from pybit.unified_trading import HTTP
-import pandas as pd
 import requests
-from flask import Flask, request
+import statistics
+import time
+import os
+from datetime import datetime
+from telegram import Bot
 
-app = Flask(__name__)
+# --- Налаштування ---
+TG_TOKEN = os.getenv("7759933501:AAF-DrVlX1I-wlWHGMOyXHM4rfoIhEX52sM")
+TG_CHAT_ID = os.getenv("788305408")
+bot = Bot(token=TG_TOKEN)
 
-TELEGRAM_TOKEN = "7759933501:AAF-DrVlX1I-wlWHGMOyXHM4rfoIhEX52sM"
-CHAT_ID = "788305408"
-
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 BYBIT_URL = "https://api.bybit.com/v5"
 
+def get_klines(symbol, interval="5"):
+    url = f"{BYBIT_URL}/market/kline?category=spot&symbol={symbol}&interval={interval}&limit=50"
+    r = requests.get(url).json()
+    if "result" not in r or "list" not in r["result"]:
+        return []
+    return r["result"]["list"]
 
-def fetch_ohlcv(symbol, interval="60"):
-    kline = client.get_kline(symbol=symbol, interval=interval, limit=200)['result']
-    df = pd.DataFrame(kline)
-    df['close'] = df['close'].astype(float)
-    df['high'] = df['high'].astype(float)
-    df['low'] = df['low'].astype(float)
-    df['hl'] = df['high'] - df['low']
-    df['hc'] = (df['high'] - df['close'].shift()).abs()
-    df['lc'] = (df['low'] - df['close'].shift()).abs()
-    df['tr'] = df[['hl','hc','lc']].max(axis=1)
-    df['ATR'] = df['tr'].rolling(14).mean()
-    return df
+def is_flat(symbol, threshold=0.3):
+    klines = get_klines(symbol)
+    if not klines:
+        return False, 0
+    highs = [float(k[2]) for k in klines]
+    lows = [float(k[3]) for k in klines]
+    rng = (max(highs) - min(lows)) / statistics.mean(highs) * 100
+    return rng < threshold, rng
 
-@app.route('/scan', methods=['POST'])
-def scan_flat():
-    symbols = [s['name'] for s in client.get_symbols()['result'] if 'USDT' in s['name']]
-    flat_coins = []
-    for symbol in symbols[:50]:
-        df = fetch_ohlcv(symbol)
-        last_close = df['close'].iloc[-1]
-        last_atr = df['ATR'].iloc[-1]
-        if last_atr / last_close < 0.005:
-            flat_coins.append(symbol)
-    if flat_coins:
-        msg = "📊 Монети у флеті:\n" + "\n".join(flat_coins)
-        send_telegram(msg)
-    return "OK", 200
+def main():
+    url = f"{BYBIT_URL}/market/tickers?category=spot"
+    data = requests.get(url).json()["result"]["list"]
+
+    flat_list = []
+    for coin in data:
+        symbol = coin["symbol"]
+        flat, rng = is_flat(symbol)
+        if flat:
+            flat_list.append(f"{symbol} у флеті ({rng:.2f}%)")
+
+    if flat_list:
+        msg = "📉 Монети у флеті:\n" + "\n".join(flat_list)
+        bot.send_message(chat_id=TG_CHAT_ID, text=msg)
+        print(msg)
+    else:
+        print("Флетів не знайдено", datetime.now())
 
 if __name__ == "__main__":
-    app.run()
+    while True:
+        main()
+        time.sleep(300)
