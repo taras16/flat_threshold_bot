@@ -11,8 +11,8 @@ CHAT_ID = "788305408"
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+BYBIT_URL = "https://api.bybit.com/v5"
 
-client = HTTP(endpoint="https://api.bybit.com")
 
 def fetch_ohlcv(symbol, interval="60"):
     kline = client.get_kline(symbol=symbol, interval=interval, limit=200)['result']
